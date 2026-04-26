@@ -1,0 +1,20 @@
+{
+  "Name": "ColorTweaker",
+  "Version": "0.1.0",
+  "Title": "Color Tweaker",
+  "Description": "Feeling hard to distinguish colors? Try this mod.",
+  "Author": "pnckxx@pm.me",
+  "AffectsSaveGames": false,
+  "DisablesAchievements": false,
+  "Conflicts": [],
+  "Dependencies": [
+    {
+      "ModId": "steam:3542611357",
+      "ModTitle": "Shapez Shifter",
+      "Version": "1.0.*"
+    }
+  ],
+  "Assemblies": [
+    "ColorTweaker.dll"
+  ]
+}
