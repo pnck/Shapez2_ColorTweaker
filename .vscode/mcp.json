@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "dnSpy": {
+      "type": "http",
+      "url": "http://192.168.94.102:16205"
+    },
+    "VisualStudio": {
+      "type": "sse",
+      "url": "http://192.168.94.102:16206"
+    }
+  }
+}
