@@ -15,16 +15,16 @@
 			<HintPath>LibHints\MonoMod.RuntimeDetour.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
-		<Reference Include="ShapezShifter" Publicize="true">
-			<HintPath>LibHints\ShapezShifter.dll</HintPath>
-			<Private>False</Private>
-		</Reference>
 		<Reference Include="SPZGameAssembly" Publicize="true">
 			<HintPath>$(SPZ2_PATH)\SPZGameAssembly.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
 		<Reference Include="Core" Publicize="true">
 			<HintPath>$(SPZ2_PATH)\Core.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="Core.Localization" Publicize="true">
+			<HintPath>$(SPZ2_PATH)\Core.Localization.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
 		<Reference Include="Game.Core" Publicize="true">
@@ -65,6 +65,10 @@
 		</Reference>
 		<Reference Include="UnityEngine.ImageConversionModule">
 			<HintPath>$(SPZ2_PATH)\UnityEngine.ImageConversionModule.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="Unity.Core">
+			<HintPath>$(SPZ2_PATH)\Unity.Core.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
 		<Reference Include="Unity.Mathematics">

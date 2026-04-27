@@ -27,6 +27,8 @@ HUDComponent  (MonoBehaviour base)
 | `UIBackBtn` | `HUDMenuBackButton` |
 | `UIContinueBtn` / `UIMenuBtn` / `UISaveBtn` / `UISettingsBtn` / `UIExitBtn` | **`HUDMenuButton`** |
 | `UIPlaytimeStatText` and other stat labels | `HUDLocalizedText` |
+| `UISoundPlayer` | `IUISoundPlayer` |
+| `DialogStack` | `IHUDDialogStack` |
 
 ### `Construct(...)` key behavior
 ```csharp
@@ -138,65 +140,104 @@ All native UI extension APIs require an AssetBundle:
 - `HUDSettingsRenderer.CreateContentGroup<T>()` needs `PrefabViewReference<T>`
 - ShapezShifter provides no UI helpers
 
-Solution: **build the panel entirely in code using Unity UGUI APIs**.
+Workaround for dialogs: `Globals.Resources.UIDialogSimpleInputPrefab` / `UIDialogSimpleInfoPrefab` are accessible at runtime despite `Globals.Resources` being marked `[Obsolete]`. This is the only way to access dialog prefabs without an AssetBundle.
 
-### Step 1: Inject Button into Pause Menu
+### Step 1: Inject Button into Pause Menu (VERIFIED WORKING)
 
-Hook `HUDPauseMenu.Construct()` **postfix**:
+**Hook `HUDPauseMenu.Show()`, NOT `Construct()`.**
+
+> `Construct` is a Zenject `[Construct]` injection point called once at scene startup — **before** mod hooks are registered. `Show()` is called every time the menu opens, and is guaranteed to fire after mod load.
 
 ```csharp
-// Clone an existing button to inherit full styling
-var newGO = Object.Instantiate(self.UISettingsBtn.gameObject, self.UIButtons.transform);
-var btn = newGO.GetComponent<HUDMenuButton>();
-btn.Construct(uiSoundPlayer);          // manual DI injection (clone does not go through Zenject)
-btn.Text = new RawText("Color Tweaker");
-btn.OnClick.AddListener(() => _panel.Toggle());
+private delegate void ShowDelegate(HUDPauseMenu self);
+
+private void HookShow(ShowDelegate orig, HUDPauseMenu self)
+{
+    orig(self);
+    try { InjectButtonIfNeeded(self); }
+    catch (Exception ex) { _logger.Info?.Log($"error: {ex}"); }
+}
+
+private void InjectButtonIfNeeded(HUDPauseMenu self)
+{
+    // Guard: inject only once per HUDPauseMenu instance
+    if (self.UIButtons.transform.Find("ColorTweaker_TestItem") != null) return;
+
+    var instance = UnityEngine.Object.Instantiate(self.UISettingsBtn.gameObject, self.UIButtons.transform);
+    instance.name = "ColorTweaker_TestItem";
+    var button = instance.GetComponent<HUDMenuButton>();
+
+    // REQUIRED: After Instantiate, non-Unity-serialized fields (Resolver, etc.)
+    // are null on the clone. Must be copied before Construct is called.
+    InitClonedLocalizedText(self.UISettingsBtn.UIText, button.UIText);
+    button.Construct(self.UISoundPlayer);
+    button.Text = new RawText("ColorTweaker Panel");
+    button.OnClick.RemoveAllListeners();
+    button.OnClick.AddListener(() => OpenDialog(self.DialogStack));
+}
+
+// HUDLocalizedText.Resolver (ILocalizationResolver) is an interface injected by Zenject.
+// Object.Instantiate does NOT copy it — UpdateView() throws "not constructed yet" if null.
+// Solution: copy from the original button before calling Construct().
+private static void InitClonedLocalizedText(HUDLocalizedText original, HUDLocalizedText clone)
+{
+    clone.Resolver = original.Resolver;
+    clone._TextStyleProvider = original._TextStyleProvider;
+    clone.Builder = new System.Text.StringBuilder();
+}
 ```
 
-- `uiSoundPlayer` comes from `HUDPauseMenu.Construct` hook parameters
-- As a sibling clone, layout components (VerticalLayoutGroup, etc.) arrange it automatically
-- No DOTween handling needed — the `UIButtons` container animation covers all children
+**Key fields available on `self` inside `HookShow`** (populated by Construct, already valid by Show time):
+- `self.UISoundPlayer` — pass to `button.Construct()`
+- `self.DialogStack` — pass to dialog Show calls
+- `self.UISettingsBtn.UIText` — source for `InitClonedLocalizedText`
 
-### Step 2: Build the Custom Color Settings Panel
-
-Construct once (lazy init) in the hook postfix:
+### Step 2: Dialog for Color Input (VERIFIED WORKING)
 
 ```csharp
-// Parent = HUDPauseMenu's parent (HUD Canvas or direct container)
+var dialog = dialogStack.Show<HUDDialogSimpleInput>(Globals.Resources.UIDialogSimpleInputPrefab);
+dialog.Init(
+    new RawText("Title"),
+    new RawText("Description"),
+    new RawText("Button label"),
+    new RawText("default value"),
+    correctorFunc   // Func<string, string>; return cleaned input
+);
+dialog.OnConfirmed.Register(input => { /* handle */ });
+```
+
+Info dialog:
+```csharp
+var info = dialogStack.Show<HUDDialogSimpleInfo>(Globals.Resources.UIDialogSimpleInfoPrefab);
+info.Init(new RawText("Title"), new RawText("Message"), new RawText("OK"));
+```
+
+### Step 3: Cache Invalidation without Coupling
+
+When the dialog applies a new color:
+```csharp
+ColorOverrides.Set('r', color);  // fires ColorOverrides.OnChanged
+// ColorRenderHook receives OnChanged event and clears its own cache automatically
+// PauseMenuTestItemHook does NOT know about ColorRenderHook
+```
+
+### Step 4 (Future): Full UGUI Color Panel
+
+Build once, parent to `self.transform.parent` (HUD Canvas):
+```csharp
 var panelGO = new GameObject("ColorTweakerPanel");
 panelGO.transform.SetParent(self.transform.parent, worldPositionStays: false);
-
-// RectTransform — fullscreen
 var rect = panelGO.AddComponent<RectTransform>();
 rect.anchorMin = Vector2.zero; rect.anchorMax = Vector2.one;
 rect.offsetMin = rect.offsetMax = Vector2.zero;
-
-// Background
 var bg = panelGO.AddComponent<Image>();
 bg.color = new Color(0.08f, 0.08f, 0.08f, 0.93f);
-
-// Block clicks from passing through to the game scene
 panelGO.AddComponent<GraphicRaycaster>();
-
-// Content layout (VerticalLayoutGroup)
-var content = new GameObject("Content");
-content.transform.SetParent(panelGO.transform, false);
-// ... add Slider × 3 (H/S/V or R/G/B) × 6 color codes
-
 panelGO.SetActive(false);
-_panel = panelGO;
 ```
 
-### Step 3: Color Edit UI Layout
-
-Per color row (e.g. red `r`):
-```
-[Label "Red"]  [Color Swatch]  [R Slider] [G Slider] [B Slider]  [Hex Input]
-```
-- `UnityEngine.UI.Slider` (min=0, max=1)
-- `Slider.onValueChanged` → call `ColorOverrides.Set(code, newColor)` + `_hook.ClearCache(code)` live
-- `UnityEngine.UI.InputField` for hex entry
-- `UnityEngine.UI.Image` swatch; background = current color
+Per color row: `[Label]  [Swatch]  [R Slider] [G Slider] [B Slider]  [Hex InputField]`
+- `Slider.onValueChanged` → `ColorOverrides.Set(code, newColor)` (invalidation automatic via event)
 
 ### Step 4: Config Persistence (JSON)
 

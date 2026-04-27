@@ -10,11 +10,12 @@ using ILogger = Core.Logging.ILogger;
 public class ModEntry : IMod
 {
     private readonly ColorRenderHook _hook;
+    private readonly PauseMenuTestItemHook _pauseMenuHook;
 
     public ModEntry(ILogger logger)
     {
-
         _hook = new ColorRenderHook(logger);
+        _pauseMenuHook = new PauseMenuTestItemHook(logger);
 
         ColorOverrides.Set('r', new Color(.82f, .07f, .08f));
         ColorOverrides.Set('g', new Color(.09f, .55f, .06f));
@@ -28,6 +29,7 @@ public class ModEntry : IMod
 
     public void Dispose()
     {
+        _pauseMenuHook.Dispose();
         _hook.Dispose();
     }
 }

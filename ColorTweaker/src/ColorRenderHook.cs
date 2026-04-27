@@ -1,9 +1,9 @@
 ﻿using Game.Content.Features.Fluids;
 using Game.Core.Shape.Colors;
 using MonoMod.RuntimeDetour;
-using ShapezShifter.SharpDetour;
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
 
 namespace ColorTweaker;
@@ -81,21 +81,27 @@ public class ColorRenderHook : IDisposable
         var ctor = typeof(ShapeColorVisualizationScheme).GetConstructor(
             new[] { typeof(MetaShapeColorVisualizationScheme) }
         );
+        var getDataFluid = typeof(ShapeColorVisualizationScheme).GetMethod(
+            nameof(ShapeColorVisualizationScheme.GetData),
+            new[] { typeof(IFluid) }
+        );
+        var getDataShape = typeof(ShapeColorVisualizationScheme).GetMethod(
+            nameof(ShapeColorVisualizationScheme.GetData),
+            new[] { typeof(IShapeColor) }
+        );
+
+        if (ctor == null || getDataFluid == null || getDataShape == null)
+        {
+            throw new InvalidOperationException("Failed to resolve ShapeColorVisualizationScheme hook targets.");
+        }
 
         _hooks.Add(new Hook(ctor, PostfixCtor));
 
-        _hooks.Add(DetourHelper.CreatePostfixHook<ShapeColorVisualizationScheme, IFluid, ColorRenderData>(
-            (self, fluid) => self.GetData(fluid),
-            PostfixGetDataFluid
-        ));
+        _hooks.Add(new Hook(getDataFluid, HookGetDataFluid));
+        _hooks.Add(new Hook(getDataShape, HookGetDataShape));
 
-        _hooks.Add(DetourHelper.CreatePostfixHook<ShapeColorVisualizationScheme, IShapeColor, ColorRenderData>(
-            (self, color) => self.GetData(color),
-            PostfixGetDataShape
-        ));
-
+        ColorOverrides.OnChanged += InvalidateOverride;
         _logger.Info?.Log("ColorRenderHook registered.");
-
     }
 
     private void PostfixCtor(Action<ShapeColorVisualizationScheme, MetaShapeColorVisualizationScheme> ctor, ShapeColorVisualizationScheme self, MetaShapeColorVisualizationScheme metaScheme)
@@ -104,9 +110,12 @@ public class ColorRenderHook : IDisposable
         _Cache[self] = new SchemeRenderData(self, metaScheme, _logger);
     }
 
-    private ColorRenderData PostfixGetDataFluid(
-        ShapeColorVisualizationScheme self, IFluid fluid, ColorRenderData cur)
+    private delegate ColorRenderData GetDataFluidDelegate(ShapeColorVisualizationScheme self, IFluid fluid);
+    private delegate ColorRenderData GetDataShapeDelegate(ShapeColorVisualizationScheme self, IShapeColor color);
+
+    private ColorRenderData HookGetDataFluid(GetDataFluidDelegate orig, ShapeColorVisualizationScheme self, IFluid fluid)
     {
+        var cur = orig(self, fluid);
         if (fluid is ColorFluid cf)
         {
             return GetOverrided(cf.Color.Code, self, cur);
@@ -114,9 +123,9 @@ public class ColorRenderHook : IDisposable
         return cur;
     }
 
-    private ColorRenderData PostfixGetDataShape(
-        ShapeColorVisualizationScheme self, IShapeColor color, ColorRenderData cur)
+    private ColorRenderData HookGetDataShape(GetDataShapeDelegate orig, ShapeColorVisualizationScheme self, IShapeColor color)
     {
+        var cur = orig(self, color);
         return GetOverrided(color.Code, self, cur);
     }
 
@@ -247,8 +256,17 @@ public class ColorRenderHook : IDisposable
 
     public void Dispose()
     {
+        ColorOverrides.OnChanged -= InvalidateOverride;
         foreach (var hook in _hooks)
             hook.Dispose();
         _hooks.Clear();
+    }
+
+    private void InvalidateOverride(char code)
+    {
+        foreach (var cache in _Cache.Values)
+        {
+            cache._overrideCache.Remove(code);
+        }
     }
 }

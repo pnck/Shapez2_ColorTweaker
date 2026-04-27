@@ -1,13 +1,13 @@
 ---
 name: colortweaker-dev
-description: "LOAD IMMEDIATELY when working on ColorTweaker mod. Provides full dev context: current implementation status, game color rendering architecture (ShapeColorVisualizationScheme, ColorRenderData, MaterialPropertyBlock), hook strategy via ShapezShifter SharpDetours, dnspy MCP tool usage. Keywords: shapez2 mod, ColorTweaker, color rendering, hook, dnspy, FluidColorGenerator, MonoMod, MaterialReference, LOD6Material"
+description: "LOAD IMMEDIATELY when working on ColorTweaker mod. Provides full dev context: current implementation status, game color rendering architecture (ShapeColorVisualizationScheme, ColorRenderData, MaterialPropertyBlock), hook strategy via pure MonoMod.RuntimeDetour, HUD/menu injection, dnspy MCP tool usage. Keywords: shapez2 mod, ColorTweaker, color rendering, hook, dnspy, FluidColorGenerator, MonoMod, MaterialReference, LOD6Material, HUDPauseMenu, HUDMenuButton"
 ---
 
 # ColorTweaker Dev Context
 
 ## On Load: Required Steps
 
-1. Read the source files to understand current state: four files under `ColorTweaker/src/` — `ModEntry.cs`, `Hook.cs`, `ColorOverride.cs`, `Calc.cs`
+1. Read the source files to understand current state: five files under `ColorTweaker/src/` — `ModEntry.cs`, `ColorRenderHook.cs`, `ColorOverride.cs`, `Calc.cs`, `PauseMenuTestItemHook.cs`
 2. If the task involves reverse engineering (decompiling game assemblies, inspecting fields/methods, identifying hook targets):
    - Use `tool_search("dnspy mcp decompile")` to load deferred tools
    - Call `mcp_dnspy_list_assemblies()` to verify availability
@@ -37,10 +37,11 @@ The build machine runs Visual Studio on Windows (separate from the agent host). 
 ## Current Development State
 
 ### Completed
-- `ModEntry.cs`: mod entry point; registers 6 color overrides (r/g/b/y/c/m), instantiates `ColorRenderHook`
-- `ColorOverride.cs`: global static dictionary with `Set/Clear/TryGet` interface
+- `ModEntry.cs`: mod entry point; registers 6 color overrides (r/g/b/y/c/m), instantiates `ColorRenderHook` then `PauseMenuTestItemHook` independently
+- `ColorOverride.cs`: global static dictionary with `Set/Clear/TryGet` + `static event Action<char> OnChanged` (fires on Set/Clear)
 - `Calc.cs`: `FluidColorGenerator.Generate()` — derives Base/Highlight1/Highlight2/Minimal/FinalTint from a target color
-- `Hook.cs`: 3 postfix hooks intercepting `ShapeColorVisualizationScheme` constructor and `GetData()` overloads; caches original material colors, supports override and restore
+- `ColorRenderHook.cs`: 3 MonoMod hooks on `ShapeColorVisualizationScheme` (ctor + 2 GetData overloads); subscribes to `ColorOverrides.OnChanged` for cache invalidation; no coupling to menu code
+- `PauseMenuTestItemHook.cs`: hooks `HUDPauseMenu.Show()` (not `Construct`!) to inject a cloned button; opens `HUDDialogSimpleInput`; no coupling to ColorRenderHook
 
 ### Known Design Tensions (unresolved)
 - **InstancingId discontinuity**: overriding creates a new `ColorRenderData` with `InstancingIdManager.AcquirePropertyBlockHash("color-render-data::" + targetColor)` — different key from original → possible GPU instancing batch splits; performance impact unknown
@@ -48,19 +49,12 @@ The build machine runs Visual Studio on Windows (separate from the agent host). 
 - **LOD6Material vs MaterialReference layering**: hook modifies via `MetaShapeColorRenderData` (holds `MaterialReference`), while runtime `ColorRenderData` wraps them as `LOD6Material`; both share the same underlying `Material`, so changes should propagate
 - **FluidColorGenerator parameters** (energy=0.6, purity=0.1, lift=0.2) are hardcoded at call site — visual tuning not yet done
 
-### Next Goal: In-Game Color Tweaker Menu
+### Next Goals
+1. **Persist user config** — save color settings to a local JSON file, restore on game start (`Application.persistentDataPath + "/mods/ColorTweaker/config.json"`)
+2. **Support all 6 color codes** — current dialog is hardcoded to `'r'`; generalize to allow user to select the code
+3. **(Optional) Real-time UGUI panel** — Sliders + swatches built programmatically; see hud-menu-arch.md Step 2/3
 
-Three sub-goals in priority order:
-1. **Inject a custom entry into the pause menu** — hook pause menu UI, add a button to open the ColorTweaker panel
-2. **Persist user config** — save color settings to a local JSON file, restore on game start
-3. **(Optional) Real-time in-menu preview** — reflect live color changes without leaving the menu
-
-**Strategy decided** (see hud-menu-arch.md):
-- No AssetBundle needed: clone `UISettingsBtn`, manually call `btn.Construct(uiSoundPlayer)`, append to `UIButtons` container
-- Panel: build UGUI entirely in code (`new GameObject` + `Image` + `Slider` + `InputField`), parent to HUD Canvas
-- Persistence: JSON at `Application.persistentDataPath + "/mods/ColorTweaker/config.json"`
-
-See [./references/hud-menu-arch.md](./references/hud-menu-arch.md) for the full implementation plan with code scaffolding.
+See [./references/hud-menu-arch.md](./references/hud-menu-arch.md) for the full implementation plan.
 
 ---
 
@@ -68,10 +62,11 @@ See [./references/hud-menu-arch.md](./references/hud-menu-arch.md) for the full 
 
 ```
 ColorTweaker/src/
-├── ModEntry.cs        ← IMod entry; sets up ColorOverrides, creates ColorRenderHook
-├── Hook.cs            ← ColorRenderHook: 3 postfix hooks + override/restore logic
-├── ColorOverride.cs   ← Global override dictionary (char → UnityEngine.Color)
-└── Calc.cs            ← FluidColorGenerator: target color → multi-layer shader colors
+├── ModEntry.cs              ← IMod entry; sets up ColorOverrides, creates both hooks
+├── ColorRenderHook.cs       ← 3 MonoMod hooks on ShapeColorVisualizationScheme
+├── ColorOverride.cs         ← Global override dictionary + OnChanged event
+├── PauseMenuTestItemHook.cs ← Hooks HUDPauseMenu.Show; injects button + dialog flow
+└── Calc.cs                  ← FluidColorGenerator: target color → multi-layer shader colors
 ```
 
 **Build**: `dotnet build` → output to `$(SPZ2_PERSISTENT)/mods/ColorTweaker/`  
@@ -81,19 +76,46 @@ ColorTweaker/src/
 
 ## Hook Strategy Summary
 
+**Dependency**: `MonoMod.RuntimeDetour` only — ShapezShifter has been removed.
+
+All hooks use `new Hook(methodInfo, handler)` where the handler's first parameter is a typed delegate matching the original method's signature (including the `self` instance as first arg):
+
+```csharp
+// Pattern for instance methods:
+private delegate ReturnType MyDelegate(TargetType self, Arg1Type arg1, ...);
+private ReturnType HookMethod(MyDelegate orig, TargetType self, Arg1Type arg1, ...)
+{
+    var result = orig(self, arg1, ...);
+    // postfix logic here
+    return result;
+}
+// Register:
+_hooks.Add(new Hook(methodInfo, HookMethod));
 ```
-PostfixCtor           → ShapeColorVisualizationScheme..ctor
+
+**Color rendering hooks** (in `ColorRenderHook.cs`):
+```
+HookCtor              → ShapeColorVisualizationScheme..ctor
                          caches SchemeRenderData (meta + original material colors)
 
-PostfixGetDataFluid   → ShapeColorVisualizationScheme.GetData(IFluid)
-PostfixGetDataShape   → ShapeColorVisualizationScheme.GetData(IShapeColor)
+HookGetDataFluid      → ShapeColorVisualizationScheme.GetData(IFluid)
+HookGetDataShape      → ShapeColorVisualizationScheme.GetData(IShapeColor)
                          → GetOverrided(code, self, curRenderData)
                             ├── no override → return as-is (restore materials first if previously overridden)
                             └── has override → generate colors, mutate materials,
                                                construct new ColorRenderData, cache result
 ```
 
-`DetourHelper.CreatePostfixHook<TInstance, TArg, TReturn>((self, arg) => self.Method(arg), handler)` — ShapezShifter SharpDetour postfix pattern.
+**Cache invalidation**: `ColorRenderHook` subscribes to `ColorOverrides.OnChanged` in its constructor. When `ColorOverrides.Set()` is called (e.g. from `PauseMenuTestItemHook`), the event fires and `InvalidateOverride(code)` clears `_overrideCache` for that code across all schemes. No direct coupling between the two hook classes.
+
+**Menu injection hook** (in `PauseMenuTestItemHook.cs`):
+```
+HookShow              → HUDPauseMenu.Show()
+                         Called every time the pause menu opens (safe to re-hook repeatedly)
+                         Injects button on first call per HUDPauseMenu instance (guarded by name lookup)
+```
+
+**CRITICAL**: Hook `HUDPauseMenu.Show()`, NOT `Construct()`. `Construct` is a Zenject DI injection point called once at scene startup — before mod hooks are registered — so it will never fire for a mod hook.
 
 ---
 

@@ -9,9 +9,9 @@
   "Conflicts": [],
   "Dependencies": [
     {
-      "ModId": "steam:3542611357",
-      "ModTitle": "Shapez Shifter",
-      "Version": "1.0.*"
+      "ModId": "steam:3542712030",
+      "ModTitle": "MonoMod.RuntimeDetour",
+      "Version": "^25.2.3"
     }
   ],
   "Assemblies": [
