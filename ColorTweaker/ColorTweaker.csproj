@@ -10,45 +10,46 @@
 		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 	</PropertyGroup>
 	<ItemGroup>
-		<Reference Include="MonoMod.RuntimeDetour">
+		<PackageReference Include="BepInEx.AssemblyPublicizer.MSBuild" Version="0.4.2" PrivateAssets="all" />
+		<Reference Include="MonoMod.RuntimeDetour" Publicize="true">
 			<HintPath>LibHints\MonoMod.RuntimeDetour.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
-		<Reference Include="ShapezShifter">
+		<Reference Include="ShapezShifter" Publicize="true">
 			<HintPath>LibHints\ShapezShifter.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
-		<Reference Include="SPZGameAssembly">
+		<Reference Include="SPZGameAssembly" Publicize="true">
 			<HintPath>$(SPZ2_PATH)\SPZGameAssembly.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
-		<Reference Include="Core">
+		<Reference Include="Core" Publicize="true">
 			<HintPath>$(SPZ2_PATH)\Core.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
-		<Reference Include="Game.Core">
+		<Reference Include="Game.Core" Publicize="true">
 			<HintPath>$(SPZ2_PATH)\Game.Core.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
-		<Reference Include="Game.Content">
+		<Reference Include="Game.Content" Publicize="true">
 			<HintPath>$(SPZ2_PATH)\Game.Content.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
-		<Reference Include="Game.Content.Features">
+		<Reference Include="Game.Content.Features" Publicize="true">
 			<HintPath>$(SPZ2_PATH)\Game.Content.Features.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
 		<!-- 颜色渲染：hook 颜色ID → RGBA 的映射 -->
-		<Reference Include="Game.Core.Rendering">
+		<Reference Include="Game.Core.Rendering" Publicize="true">
 			<HintPath>$(SPZ2_PATH)\Game.Core.Rendering.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
 		<!-- 游戏内菜单和UI -->
-		<Reference Include="Game.Interaction">
+		<Reference Include="Game.Interaction" Publicize="true">
 			<HintPath>$(SPZ2_PATH)\Game.Interaction.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
-		<Reference Include="Game.Orchestration">
+		<Reference Include="Game.Orchestration" Publicize="true">
 			<HintPath>$(SPZ2_PATH)\Game.Orchestration.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
@@ -75,19 +76,15 @@
 	<PropertyGroup>
 		<PublicizerClearCacheOnClean>true</PublicizerClearCacheOnClean>
 	</PropertyGroup>
-	<PropertyGroup>
-		<PublicizerLogFilePath>logs/krafs</PublicizerLogFilePath>
-	</PropertyGroup>
+
 	<ItemGroup>
-		<PackageReference Include="Krafs.Publicizer" Version="2.3.0">
-			<PrivateAssets>all</PrivateAssets>
-			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-		</PackageReference>
-		<None Update="manifest.json">
-			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-		</None>
 		<None Update="manifest.json">
 			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 		</None>
 	</ItemGroup>
+
+	<Target Name="SteamPublish">
+		<Exec Command='powershell -ExecutionPolicy Bypass -File "$(ProjectDir)Steam\SteamPublish.ps1" "$(OutputPath.TrimEnd(`\`))"' />
+	</Target>
+
 </Project>

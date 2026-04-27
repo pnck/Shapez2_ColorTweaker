@@ -21,20 +21,6 @@ public class ColorRenderHook : IDisposable
         public Dictionary<char, ColorRenderData> _overrideCache = new();
         public readonly ILogger _logger;
 
-        private static Color GetFluidMaterialColor(ShapeColorVisualizationScheme scheme, char code)
-        {
-            var field = typeof(ShapeColorVisualizationScheme)
-                .GetField("FluidMaterials", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                ?? typeof(ShapeColorVisualizationScheme)
-                    .GetField("_fluidMaterials", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-            if (field == null) return default;
-
-            var dict = field.GetValue(scheme) as System.Collections.IDictionary;
-            if (dict == null) return default;
-
-            return dict.Contains(code) ? ((ColorRenderData)dict[code]).Color : default;
-        }
         public SchemeRenderData(ShapeColorVisualizationScheme scheme, MetaShapeColorVisualizationScheme metaScheme, ILogger logger)
         {
             _logger = logger;
@@ -43,7 +29,7 @@ public class ColorRenderHook : IDisposable
             {
                 char code = kv.Key.Code;
                 _savedMetaRenderData[code] = kv.Value.RenderData;
-                _logger.Debug?.Log($"ColorKey[{code}] = RGBA({GetFluidMaterialColor(scheme, code)})");
+                _logger.Debug?.Log($"ColorKey[{code}] = RGBA({scheme.FluidMaterials?[code].Color})");
                 var meta = kv.Value.RenderData;
                 var colorProps = new Dictionary<(MaterialReference, string), Color>();
                 foreach (var mr in new[] { meta.MapResourceMaterial,
@@ -193,6 +179,14 @@ public class ColorRenderHook : IDisposable
 
 
                 var overrideData = new ColorRenderData(meta, targetColor);
+                overrideData.PropertyBlock.SetColor("_FluidBase", generatedColors.Base);
+                overrideData.PropertyBlock.SetColor("_FluidHighlight1", generatedColors.Highlight1);
+                overrideData.PropertyBlock.SetColor("_FluidHighlight2", generatedColors.Highlight2);
+                overrideData.PropertyBlock.SetColor("_FinalTint", generatedColors.FinalTint);
+                overrideData.PropertyBlock.SetColor("_Color", generatedColors.Minimal);
+                overrideData.PropertyBlock.SetColor("_ColorBase", generatedColors.Base);
+                overrideData.PropertyBlock.SetColor("_ColorHighlight1", generatedColors.Highlight1);
+                overrideData.PropertyBlock.SetColor("_ColorHighlight2", generatedColors.Highlight2);
                 _overrideCache[code] = overrideData;
                 return overrideData;
             }
